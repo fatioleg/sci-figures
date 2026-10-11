@@ -74,7 +74,7 @@ As figuras geradas pertencem a você. As licenças abaixo valem para as ferramen
 | D2 | MPL-2.0 | automático |
 | CairoSVG | LGPL-3.0 | automático (SVG → PDF/PNG) |
 | Pillow · PyYAML | MIT-CMU · MIT | automático |
-| **molar_vis** | **Artistic-2.0** | **automático (molecule-3d, ray-tracing GPU)** |
+| **molar_vis** | **Artistic-2.0** | opcional (molecule-3d, ray-tracing GPU); **instalação manual**: requer Rust e `maturin develop --release` no venv (o `figs.py setup` e o `uah.py setup-env` mostram os comandos) |
 | PyMOL open-source | licença PyMOL (permissiva) | opcional, manual |
 | VESTA | gratuito para uso acadêmico e não comercial | opcional, manual (isossuperfícies de `.cube`) |
 | UCSF ChimeraX | gratuito para uso não comercial | opcional, manual |
