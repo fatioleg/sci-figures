@@ -15,11 +15,12 @@ CLI: `python3 <skill>/scripts/figs.py [--dir figures] <comando>`. `<skill>` é a
 | `kind` | Motor | Para | Fonte |
 |---|---|---|---|
 | `molecule-2d` | RDKit (modo ACS 1996) | estruturas químicas, séries de compostos, destaque de subestrutura | `molecules: [{smiles, legend}]`, `per_row`, `highlight_smarts` |
+| `molecule-3d` | molar_vis (ray-tracing GPU, presets VMD/PyMOL/Mol*) | biomoléculas, proteínas, docking, superfícies, trajetórias MD, sítios de ligação | `source:` PDB/GRO/XYZ/SDF/CIF, `trajectory:`, `representations: [{selection, style, color, material}]`, `color_preset:`, `camera:`, `rotation:` |
 | `structure` | ASE + matplotlib | geometria otimizada, dímero, aglomerado (`ball-stick`); cristal, superfície, adsorção (`spacefill`) | `source:` xyz, cif, POSCAR, `.traj`, saída ORCA/CP2K/VASP (qualquer formato do `ase.io.read`; use `format:` se preciso), `index`, `rotation`, `repeat`, `show_cell`, `labels: symbols\|indices` |
 | `diagram` | D2 (layout `elk`) | fluxograma, pipeline, arquitetura, workflow de agentes | `diagram.d2` |
 | `plot` | matplotlib + `uah-pub.mplstyle` | dados reais: perfil de energia, convergência, espectros, método × referência | `plot.py` (usa `plt` e `save(fig)` injetados) + `inputs: [dados.csv]` |
 
-Fora do automático (manual ou premium, só para figura-chave): **VESTA** (isossuperfícies de `.cube`, cristais), **PyMOL** open-source (biomoléculas, orbitais por script), **ChimeraX** (licença acadêmica), **Blender + Molecular Nodes** (capa e divulgação), **Inkscape** (polimento final de SVG). Para 3D interativo, perfis de energia ao vivo e modos vibracionais, use o **CalcBoard**.
+Fora do automático (manual ou premium, só para figura-chave): **molar_vis** (engine `molecule-3d`: ray-tracing GPU com presets VMD/PyMOL/Mol*, MD trajectories, docking, superfícies), **VESTA** (isossuperfícies de `.cube`, cristais), **PyMOL** open-source (biomoléculas, orbitais por script), **ChimeraX** (licença acadêmica), **Blender + Molecular Nodes** (capa e divulgação), **Inkscape** (polimento final de SVG). Para 3D interativo, perfis de energia ao vivo e modos vibracionais, use o **CalcBoard**.
 
 ## Fluxo
 

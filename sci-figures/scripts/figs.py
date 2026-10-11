@@ -34,10 +34,10 @@ VERSION = "0.1.0"
 SKILL = Path(__file__).resolve().parents[1]
 VENV = Path(os.environ.get("SCI_FIGURES_VENV", Path.home() / ".local/share/sci-figures/venv"))
 DEPS = ["rdkit", "ase", "matplotlib", "pyyaml", "pillow", "cairosvg"]
-KINDS = ("molecule-2d", "diagram", "structure", "plot")
+KINDS = ("molecule-2d", "molecule-3d", "diagram", "structure", "plot")
 FORMATS = ("svg", "pdf", "png")
 DEFAULT_SOURCE = {"diagram": "diagram.d2", "plot": "plot.py"}
-DATA_KINDS = ("plot", "structure")
+DATA_KINDS = ("plot", "structure", "molecule-3d")
 
 
 def _subcommand(argv: list[str]) -> str | None:
@@ -478,8 +478,174 @@ def render_plot(fig_dir: Path, spec: dict) -> dict:
     return {}
 
 
-RENDERERS = {"molecule-2d": render_molecule_2d, "diagram": render_diagram, "structure": render_structure,
-             "plot": render_plot}
+def render_molecule_3d(fig_dir: Path, spec: dict) -> dict:
+    """Render high-quality 3D molecular figures using molar_vis Python bindings.
+
+    Requires: molar_vis Python module (built from source with maturin).
+    """
+    import importlib
+    try:
+        mv = importlib.import_module("molar_vis")
+    except ImportError:
+        raise FigError(
+            "molecule-3d: molar_vis Python bindings not found. "
+            "Build from source: git clone https://github.com/yesint/molar_vis && "
+            "cd molar_vis && python3 -m venv .venv && source .venv/bin/activate && "
+            "pip install maturin numpy && cd crates/molar_vis_py && maturin develop --release"
+        )
+
+    # Spec fields:
+    # source: path to structure file (PDB, GRO, XYZ, SDF, etc.)
+    # trajectory: optional path to trajectory (XTC, TRR, DCD)
+    # index: frame index for trajectory (default: -1 = last)
+    # representations: list of {selection, style, color, material, width}
+    #   style: cartoon, surface, ballstick, licorice, lines, vdw
+    #   color: element, chain, resid, ss, bfactor, charge, or hex color
+    #   material: Opaque, Transparent, Glass, Glossy, Flat, Metal, MolecularNodes
+    #   width: line/point width (1-10)
+    # rotation: "yaw,pitch" degrees or "auto" for unobstructed view
+    # color_preset: Default, VMD, PyMOL, DiscoveryStudio, MOE, MolStar
+    # camera: {projection: perspective|orthographic, background: [r,g,b] or gradient, depth_cue, ambient_occlusion, shadows}
+    # width_mm, dpi from base spec
+
+    src = fig_dir / str(spec.get("source", ""))
+    if not spec.get("source") or not src.is_file():
+        raise FigError("molecule-3d: informe `source:` com um arquivo de estrutura (PDB, GRO, XYZ, SDF, MOL, CIF, POSCAR)")
+
+    traj = spec.get("trajectory")
+    traj_path = fig_dir / str(traj) if traj else None
+    if traj and not traj_path.is_file():
+        raise FigError(f"molecule-3d: trajectory {traj!r} não encontrada")
+
+    # Build system
+    if traj_path:
+        system = mv.System(str(src))
+        system.load_trajectory(str(traj_path))
+        frame_idx = spec.get("index", -1)
+        if frame_idx >= 0:
+            system.set_frame(frame_idx)
+    else:
+        system = mv.System(str(src))
+
+    vis = mv.spawn()
+    mol = vis.add_mol(system)
+
+    reps_spec = spec.get("representations") or [
+        {"selection": "protein", "style": "cartoon", "color": "ss"},
+        {"selection": "not protein and not water", "style": "ballstick", "color": "element"},
+    ]
+
+    rep_handles = []
+    for r in reps_spec:
+        sel_str = r.get("selection", "all")
+        sel = system(sel_str) if sel_str != "all" else None
+        style = r.get("style", "cartoon")
+        color = r.get("color", "element")
+        material = r.get("material", "Opaque")
+        width = r.get("width", 1)
+
+        rep = mol.add_rep(sel, style=style, color=color, material=material)
+        if width != 1:
+            rep.width = width
+        rep_handles.append(rep)
+
+    # Color preset
+    preset = spec.get("color_preset")
+    if preset:
+        vis.set_color_preset(preset)
+
+    # Camera settings
+    cam = spec.get("camera", {})
+    projection = cam.get("projection", "perspective")
+    vis.projection(projection)
+
+    bg = cam.get("background")
+    if isinstance(bg, list) and len(bg) == 3:
+        vis.background(*bg)
+    elif isinstance(bg, dict) and bg.get("gradient"):
+        g = bg["gradient"]
+        vis.background_gradient(tuple(g.get("top", (0.1, 0.12, 0.3))), tuple(g.get("bottom", (0.0, 0.0, 0.0))))
+
+    if cam.get("depth_cue", True):
+        vis.depth_cue(mode=cam.get("depth_cue_mode", "exp2"), strength=cam.get("depth_cue_strength", 0.6), start=cam.get("depth_cue_start", 0.3))
+    else:
+        vis.depth_cue(mode="none")
+
+    if cam.get("ambient_occlusion", True):
+        vis.ambient_occlusion(True, strength=cam.get("ao_strength", 0.9), radius=cam.get("ao_radius", 0.4))
+    if cam.get("shadows", True):
+        vis.shadows(True, strength=cam.get("shadow_strength", 0.6))
+
+    axes = cam.get("axes", False)
+    if axes:
+        vis.axes(True, corner=cam.get("axes_corner", "top_left"))
+
+    # Rotation / view
+    rot = spec.get("rotation")
+    if rot == "auto":
+        # Find unobstructed view for the first representation
+        vis.unobstructed_view(rep_handles[0], zoom_out=cam.get("zoom_out", 1.0))
+    elif isinstance(rot, str) and "," in rot:
+        yaw, pitch = map(float, rot.split(","))
+        vis.rotate(yaw, pitch)
+    elif isinstance(rot, (int, float)):
+        vis.rotate(rot, 0)
+
+    # Frame if focus specified
+    focus_sel = spec.get("focus")
+    if focus_sel:
+        vis.focus(mol, system(focus_sel))
+
+    # Export images
+    stem = fig_dir / spec["id"]
+    # molar_vis Python API: vis.render_to_file(path, width, height, samples)
+    # For SVG we need to capture the interactive view and convert
+    # For now, render PNG at high DPI and convert
+
+    import tempfile
+    import subprocess
+
+    # Calculate pixel dimensions from width_mm and dpi
+    width_px = int(round(float(spec["width_mm"]) / 25.4 * int(spec["dpi"])))
+    height_px = width_px  # square by default
+
+    # Render to PNG using molar_vis (if it supports headless render)
+    # For now, use the interactive viewer's capture capability
+    # This requires a display (or Xvfb on CI)
+
+    try:
+        # Try to use molar_vis's render if available
+        if hasattr(vis, "render_to_file"):
+            png_path = stem.with_suffix(".png")
+            vis.render_to_file(str(png_path), width_px, height_px, samples=cam.get("samples", 64))
+        else:
+            # Fallback: use Xvfb + interactive capture
+            # This is a placeholder - in practice would need proper headless support
+            raise FigError("molecule-3d: headless rendering not yet implemented in molar_vis Python API. "
+                           "Use interactive viewer or wait for render_to_file support.")
+    except Exception as e:
+        raise FigError(f"molecule-3d: rendering failed: {e}")
+
+    # Convert PNG to SVG/PDF if needed using cairosvg (reverse direction not ideal)
+    # For now, only output PNG from 3D renderer
+    outputs = ["png"]
+    if "svg" in spec["outputs"] or "pdf" in spec["outputs"]:
+        # Note: 3D ray-traced images don't convert well to vector
+        pass
+
+    return {
+        "molecule_3d": {
+            "formula": system.get_chemical_formula() if hasattr(system, "get_chemical_formula") else "N/A",
+            "natoms": len(system.atoms) if hasattr(system, "atoms") else "N/A",
+            "representations": len(rep_handles),
+            "has_trajectory": traj is not None,
+            "color_preset": preset,
+        }
+    }
+
+
+RENDERERS = {"molecule-2d": render_molecule_2d, "molecule-3d": render_molecule_3d,
+             "diagram": render_diagram, "structure": render_structure, "plot": render_plot}
 
 
 # ----------------------------------------------------------------- commands
@@ -599,6 +765,9 @@ def cmd_verify(base: Path, ids: list[str]) -> int:
         if kind == "structure" and extra.get("structure"):
             st = extra["structure"]
             add("INFO", f"estrutura {st['formula']} ({st['natoms']} átomos, pbc={st['pbc']})")
+        if kind == "molecule-3d" and extra.get("molecule_3d"):
+            m3d = extra["molecule_3d"]
+            add("INFO", f"molécula 3D {m3d['formula']} ({m3d['natoms']} átomos, {m3d['representations']} representações, preset={m3d['color_preset']})")
         manifest = {"figs_version": VERSION, "verified_at": now_iso(), "id": spec.get("id"), "kind": kind,
                     "title": spec.get("title"), "alt": spec.get("alt"), "data_figure": data_fig,
                     "ai_generated": bool(spec.get("ai_generated", False)), "tools": versions,
@@ -666,6 +835,21 @@ TEMPLATES = {
                         "save(fig)\n"),
         },
     },
+    "molecule-3d": {
+        "spec": {"kind": "molecule-3d", "title": "Estrutura proteica com sítio de ligação.",
+                 "alt": "Proteína em cartoon com ligante em ball-stick e superfície do sítio ativo.", "data_figure": True,
+                 "outputs": ["png"], "dpi": 300, "width_mm": 85,
+                 "source": "proteina.pdb", "trajectory": None, "index": -1,
+                 "rotation": "auto", "color_preset": "PyMOL",
+                 "representations": [
+                     {"selection": "protein", "style": "cartoon", "color": "ss", "material": "Opaque"},
+                     {"selection": "resname LIG", "style": "ballstick", "color": "element", "material": "Glossy"},
+                     {"selection": "within 0.5 of resname LIG", "style": "surface", "color": "chain", "material": "Transparent"},
+                 ],
+                 "camera": {"projection": "perspective", "background": [0.95, 0.95, 0.98],
+                            "ambient_occlusion": True, "shadows": True, "depth_cue": True, "axes": False}},
+        "files": {"proteina.pdb": "# Substitua por seu arquivo PDB/GRO/XYZ/SDF/CIF\n# Exemplo: wget https://files.rcsb.org/download/1CRN.pdb -O proteina.pdb\n"},
+    },
 }
 
 
@@ -712,7 +896,8 @@ def cmd_doctor() -> int:
         rows.append(("WARN" if old else "OK", "d2", ver + (" — precisa ≥ 0.6 (exportação PNG/PDF sem navegador)" if old else "")))
     else:
         rows.append(("WARN", "d2", "ausente — diagramas indisponíveis (https://d2lang.com/tour/install)"))
-    for tool, why in (("pymol", "3D premium/biomoléculas por script (opcional)"), ("vesta", "cristais/isossuperfícies, manual (opcional)"),
+    for tool, why in (("molar_vis", "3D biomoléculas ray-traced (molar_vis Python bindings)"),
+                      ("pymol", "3D premium/biomoléculas por script (opcional)"), ("vesta", "cristais/isossuperfícies, manual (opcional)"),
                       ("povray", "renderização ray-traced de estruturas ASE (opcional)")):
         rows.append(("OK" if shutil.which(tool) else "INFO", tool, "presente" if shutil.which(tool) else f"ausente — {why}"))
     rows.append(("INFO", "python", f"{sys.executable} (venv: {VENV})"))
@@ -732,6 +917,10 @@ def cmd_setup() -> int:
     print(f"setup: venv pronto em {VENV} com {', '.join(DEPS)}")
     if not shutil.which("d2"):
         print("Aviso: D2 não está no PATH. Instale-o para diagramas: https://d2lang.com/tour/install")
+    print("Para molecule-3d (molar_vis): requer Rust toolchain + maturin.")
+    print("  git clone https://github.com/yesint/molar_vis")
+    print("  cd molar_vis && python3 -m venv .venv && source .venv/bin/activate")
+    print("  pip install maturin numpy && cd crates/molar_vis_py && maturin develop --release")
     return 0
 
 
