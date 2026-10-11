@@ -1,0 +1,37 @@
+# UAH publication style for matplotlib — figuras de dados para artigos e relatórios.
+# Fontes sem serifa, traços finos, sem moldura superior/direita, cores com contraste e
+# distinguíveis por daltônicos (paleta de Okabe-Ito).
+
+figure.figsize      : 3.35, 2.5      # coluna simples (~85 mm)
+figure.dpi          : 150
+savefig.dpi         : 300
+savefig.bbox        : tight
+savefig.pad_inches  : 0.03
+savefig.transparent : False
+
+font.family         : sans-serif
+font.sans-serif     : Inter, DejaVu Sans, Arial, Helvetica
+font.size           : 8
+axes.titlesize      : 8
+axes.labelsize      : 8
+xtick.labelsize     : 7
+ytick.labelsize     : 7
+legend.fontsize     : 7
+mathtext.fontset    : dejavusans
+
+axes.linewidth      : 0.6
+axes.spines.top     : False
+axes.spines.right   : False
+axes.prop_cycle     : cycler('color', ['0072B2', 'D55E00', '009E73', 'CC79A7', 'E69F00', '56B4E9', 'F0E442', '000000'])
+axes.grid           : False
+lines.linewidth     : 1.2
+lines.markersize    : 3.5
+xtick.major.width   : 0.6
+ytick.major.width   : 0.6
+xtick.major.size    : 3
+ytick.major.size    : 3
+xtick.direction     : out
+ytick.direction     : out
+legend.frameon      : False
+svg.fonttype        : path
+pdf.fonttype        : 42
