@@ -229,5 +229,46 @@ class FigsTests(unittest.TestCase):
         self.assertEqual(figs("new", "Ruim_ID", "--kind", "plot", cwd=self.root).returncode, 3)
 
 
+@unittest.skipUnless(STACK, "RDKit/ASE/matplotlib/cairosvg indisponíveis (rode figs.py setup)")
+class CodexAuditFigs(unittest.TestCase):
+    """Auditoria do Codex: proveniência da trajetória em molecule-3d e saída correta no qmd."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.fig = self.root / "figures" / "md"
+        self.fig.mkdir(parents=True)
+        (self.fig / "proteina.pdb").write_text("ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n")
+        (self.fig / "traj.xtc").write_bytes(b"\x00" * 64)
+        (self.fig / "fig.yaml").write_text("id: md\nkind: molecule-3d\ntitle: Proteína.\nalt: Proteína em cartoon.\n"
+                                           "data_figure: true\nsource: proteina.pdb\ntrajectory: traj.xtc\n"
+                                           "outputs: [png]\nwidth_mm: 85\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_trajectory_is_a_tracked_source(self):
+        png = self.fig / "md.png"
+        png.write_bytes(b"\x89PNG")
+        self.assertIn("md.png ilegível", figs("verify", "md", cwd=self.root).stdout)  # PNG falso: reprova, não quebra
+        manifest = json.loads((self.fig / "manifest.json").read_text())
+        self.assertIn("traj.xtc", manifest["sources"])
+        self.assertIn("molar_vis", manifest["tools"])
+        # registro de render feito com a trajetória atual → depois a trajetória muda
+        import hashlib
+        record = {"sources": manifest["sources"], "rendered": {"md.png": hashlib.sha256(png.read_bytes()).hexdigest()}}
+        (self.fig / ".render.json").write_text(json.dumps(record))
+        self.assertNotIn("desatualizadas", figs("verify", "md", cwd=self.root).stdout)
+        (self.fig / "traj.xtc").write_bytes(b"\x01" * 64)
+        self.assertIn("saídas desatualizadas", figs("verify", "md", cwd=self.root).stdout)
+        (self.fig / "traj.xtc").unlink()
+        self.assertIn("fonte declarada ausente: traj.xtc", figs("verify", "md", cwd=self.root).stdout)
+
+    def test_qmd_points_to_png_for_molecule_3d(self):
+        out = figs("qmd", "md", "--relative-to", "publication", cwd=self.root)
+        self.assertIn("](../figures/md/md.png){#fig-md", out.stdout)
+        self.assertNotIn(".svg", out.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

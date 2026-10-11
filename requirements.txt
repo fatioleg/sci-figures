@@ -1,0 +1,8 @@
+# Versões usadas nos testes (lock). Atualize junto com uma rodada de testes.
+rdkit==2026.9.1
+ase==3.29.0
+matplotlib==3.11.2
+numpy==2.5.4
+PyYAML==6.0.3
+pillow==12.3.0
+CairoSVG==2.9.1

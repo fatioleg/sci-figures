@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 SKILL = Path(__file__).resolve().parents[1]
 VENV = Path(os.environ.get("SCI_FIGURES_VENV", Path.home() / ".local/share/sci-figures/venv"))
 DEPS = ["rdkit", "ase", "matplotlib", "pyyaml", "pillow", "cairosvg"]
@@ -188,6 +188,14 @@ def tool_versions() -> dict:
             versions[mod] = None
     d2 = shutil.which("d2")
     versions["d2"] = run([d2, "--version"]).stdout.strip() if d2 else None
+    try:  # molar_vis (molecule-3d) é opcional; registra a versão quando instalado
+        from importlib import metadata
+        versions["molar_vis"] = metadata.version("molar_vis")
+    except Exception:  # noqa: BLE001
+        try:
+            versions["molar_vis"] = getattr(__import__("molar_vis"), "__version__", "presente (sem versão)")
+        except Exception:  # noqa: BLE001
+            versions["molar_vis"] = None
     return versions
 
 
@@ -655,6 +663,8 @@ def sources_of(fig_dir: Path, spec: dict) -> list[Path]:
     source = spec.get("source") or DEFAULT_SOURCE.get(spec.get("kind"))
     if source:
         paths.append(fig_dir / str(source))
+    if spec.get("trajectory"):
+        paths.append(fig_dir / str(spec["trajectory"]))  # XTC/TRR/DCD também determinam a figura
     paths += [fig_dir / str(p) for p in spec.get("inputs", [])]
     return paths
 
@@ -737,13 +747,16 @@ def cmd_verify(base: Path, ids: list[str]) -> int:
         sizes_ok = not any(lv == "FAIL" and m.startswith(("width_mm", "dpi")) for lv, m in spec_problems)
         if "png" in outputs_list and png.is_file() and sizes_ok:
             from PIL import Image
-            with Image.open(png) as im:
-                need = int(target_px(spec) * 0.95)
-                if im.width < need:
-                    add("FAIL", f"PNG com {im.width}px de largura; mínimo {need}px para {spec['width_mm']} mm a {spec['dpi']} dpi")
-                thumb = im.convert("RGB")
-                thumb.thumbnail((420, 320))
-                thumbs.append((name, thumb))
+            try:
+                with Image.open(png) as im:
+                    need = int(target_px(spec) * 0.95)
+                    if im.width < need:
+                        add("FAIL", f"PNG com {im.width}px de largura; mínimo {need}px para {spec['width_mm']} mm a {spec['dpi']} dpi")
+                    thumb = im.convert("RGB")
+                    thumb.thumbnail((420, 320))
+                    thumbs.append((name, thumb))
+            except Exception as exc:  # noqa: BLE001 — imagem corrompida não pode derrubar a verificação
+                add("FAIL", f"{png.name} ilegível ({type(exc).__name__}); rode render")
         svg = fig_dir / f"{spec['id']}.svg"
         if kind == "molecule-2d":
             from rdkit import Chem
@@ -873,8 +886,15 @@ def cmd_new(base: Path, fig_id: str, kind: str, force: bool) -> None:
 def cmd_qmd(base: Path, fig_id: str, rel_to: Path | None) -> None:
     fig_dir = figures_root(base) / fig_id
     spec = load_spec(fig_dir)
-    svg = fig_dir / f"{spec['id']}.svg"
-    path = os.path.relpath(svg, rel_to.resolve()) if rel_to else svg.as_posix()
+    produced = ["png"] if spec.get("kind") == "molecule-3d" else list(spec.get("outputs", []))
+    # Preferência: vetor (svg) > raster (png) > pdf; só formatos que este tipo realmente gera.
+    ext = next((e for e in ("svg", "png", "pdf") if e in produced), None)
+    if ext is None:
+        raise FigError(f"{fig_id}: nenhuma saída utilizável (outputs={spec.get('outputs')})")
+    target = fig_dir / f"{spec['id']}.{ext}"
+    if not target.is_file():
+        print(f"aviso: {target.name} ainda não existe — rode `figs.py render {fig_id}`", file=sys.stderr)
+    path = os.path.relpath(target, rel_to.resolve()) if rel_to else target.as_posix()
     alt = str(spec.get("alt", "")).replace('"', "'")
     width = f" width={min(100, round(float(spec['width_mm']) / 170 * 100))}%"
     print(f'![{spec.get("title", "")}]({path}){{#fig-{spec["id"]} fig-alt="{alt}"{width}}}')

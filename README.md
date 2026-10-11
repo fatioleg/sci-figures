@@ -86,7 +86,9 @@ As figuras geradas pertencem a você. As licenças abaixo valem para as ferramen
 python3 -m unittest discover -s tests -v
 ```
 
-São 17 testes, que rodam a CLI de verdade nos quatro tipos de figura e cobrem os casos de falha do `verify`. Se as bibliotecas científicas não
+São 19 testes, que rodam a CLI de verdade nos tipos de figura e cobrem os casos de falha do `verify`. O CI do
+GitHub roda a suíte com as versões de `requirements.txt` (lock) e o D2 fixado. A trajetória do `molecule-3d`
+(XTC/TRR/DCD) é fonte rastreada: alterá-la invalida a figura, e a versão do `molar_vis` entra no manifesto. Se as bibliotecas científicas não
 estiverem instaladas, os testes são pulados e o motivo aparece na saída.
 
 ## Licença
